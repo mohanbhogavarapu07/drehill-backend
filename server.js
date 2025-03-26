@@ -7,6 +7,9 @@ require('dotenv').config();
 const path = require('path');
 
 // Serve static files from React in production
+
+
+const app = express();
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../frontend/dist')));
   
@@ -14,9 +17,6 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
   });
 }
-
-const app = express();
-
 // Configure middleware with increased payload limits
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
