@@ -1,170 +1,164 @@
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
-// Add this near the top of your file
-
-
-// Serve static files from React in production
-
 
 const app = express();
 
-// Configure middleware with increased payload limits
+// Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Create a Nodemailer transporter
+// Email transporter with connection pooling
 const transporter = nodemailer.createTransport({
   service: 'gmail',
+  pool: true,
+  maxConnections: 5,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
 
-// Handle contact form submissions
+// Helper function for consistent email formatting
+const formatEmailContent = (fields) => {
+  let content = '';
+  for (const [key, value] of Object.entries(fields)) {
+    if (value) {
+      const label = key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
+      content += `${label}: ${value}\n`;
+    }
+  }
+  return content;
+};
+
+// Contact form endpoint
 app.post('/api/submit-form', async (req, res) => {
   try {
-    const { firstName, lastName, email, mobile, company, country, question } = req.body;
-
-    // Validate required fields
-    if (!firstName || !lastName || !email || !mobile || !country || !question) {
+    const { firstName, lastName, email, mobile, company, question } = req.body;
+    
+    // Quick validation
+    if (!firstName || !lastName || !email || !mobile || !question) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    // Plain text email content
-    const textContent = `
-      New Contact Form Submission
-      ---------------------------
-      Name: ${firstName} ${lastName}
-      Email: ${email}
-      Phone: ${mobile}
-      Company: ${company || 'Not provided'}
-      Country: ${country}
-      
-      Question/Inquiry:
-      ${question}
-      
-      You can reply directly to this email.
-      Sent via Drehill contact form at ${new Date().toLocaleString()}
-    `;
+    // Prepare email (optimized formatting)
+    const formattedContent = formatEmailContent({
+      name: `${firstName} ${lastName}`,
+      email,
+      phone: mobile,
+      company: company || 'Not provided',
+      question,
+      timestamp: new Date().toLocaleString()
+    });
 
     const mailOptions = {
-      from: process.env.EMAIL_USER,
+      from: `"${firstName} ${lastName}" <${email}>`,
+      sender: process.env.EMAIL_USER,
+      replyTo: email,
       to: process.env.OWNER_EMAIL,
-      subject: `New Contact from ${firstName} ${lastName}`,
-      text: textContent
+      subject: `New Contact: ${firstName} ${lastName}`,
+      text: `NEW CONTACT FORM SUBMISSION\n\n${formattedContent}\n\nYou can reply directly to this email.`
     };
 
-    await transporter.sendMail(mailOptions);
-    res.status(200).json({ message: 'Form submitted successfully!' });
-  } catch (error) {
-    console.error('Contact form error:', error);
-    res.status(500).json({ 
-      message: 'Failed to submit form',
-      error: error.message 
-    });
+    // Send response immediately
+    res.status(200).json({ message: 'Thank you! Your message has been sent.' });
+
+    // Process email in background
+    transporter.sendMail(mailOptions)
+      .then(() => console.log('Contact email sent'))
+      .catch(err => console.error('Contact email error:', err));
+
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-// Handle job application submissions
+// Job application endpoint
 app.post('/api/submit-application', async (req, res) => {
   try {
     const { name, email, phone, position, resume } = req.body;
-
-    // Validate required fields
+    
+    // Quick validation
     if (!name || !email || !phone || !position || !resume) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
-
-    // Validate resume format
     if (!resume.startsWith('data:application/') || !resume.includes('base64,')) {
       return res.status(400).json({ message: 'Invalid resume format' });
     }
 
-    // Plain text email content
-    const textContent = `
-      New Job Application Received
-      ---------------------------
-      Position: ${position}
-      Candidate: ${name}
-      Email: ${email}
-      Phone: ${phone}
-      
-      Resume is attached to this email.
-      
-      You can contact the candidate directly by replying to this email.
-      Application submitted via Drehill careers portal at ${new Date().toLocaleString()}
-    `;
+    // Prepare email
+    const formattedContent = formatEmailContent({
+      candidate: name,
+      email,
+      phone,
+      position,
+      timestamp: new Date().toLocaleString()
+    });
 
-    // Extract file extension from base64 string
     const fileExtension = resume.split(';')[0].split('/')[1];
     const filename = `${name.replace(/\s+/g, '_')}_resume.${fileExtension}`;
 
     const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.OWNER_2_EMAIL,  // Changed to owner 2
-      subject: `New Application for ${position}`,
-      text: textContent,
-      attachments: [
-        {
-          filename,
-          content: resume.split('base64,')[1],
-          encoding: 'base64'
-        }
-      ]
+      from: `"${name}" <${email}>`,
+      sender: process.env.EMAIL_USER,
+      replyTo: email,
+      to: process.env.OWNER_2_EMAIL,
+      subject: `Job Application: ${name} for ${position}`,
+      text: `NEW JOB APPLICATION\n\n${formattedContent}\n\nResume attached.`,
+      attachments: [{
+        filename,
+        content: resume.split('base64,')[1],
+        encoding: 'base64'
+      }]
     };
 
-    await transporter.sendMail(mailOptions);
+    // Immediate response
     res.status(200).json({ message: 'Application submitted successfully!' });
-  } catch (error) {
-    console.error('Application submission error:', error);
-    res.status(500).json({ 
-      message: 'Failed to submit application',
-      error: error.message 
-    });
+
+    // Process in background
+    transporter.sendMail(mailOptions)
+      .then(() => console.log('Application email sent'))
+      .catch(err => console.error('Application email error:', err));
+
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-// Add this new endpoint to your existing server.js
+// Notification subscription
 app.post('/api/subscribe-notification', async (req, res) => {
   try {
     const { email } = req.body;
-
-    // Validate email
+    
+    // Quick validation
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ message: 'Please provide a valid email address' });
     }
 
-    // Plain text email content
-    const textContent = `
-      New Notification Subscription
-      ----------------------------
-      Email: ${email}
-      
-      This user wants to be notified about product launches.
-      
-      Subscription created at: ${new Date().toLocaleString()}
-    `;
-
     const mailOptions = {
-      from: process.env.EMAIL_USER,
+      from: `"Notification Subscriber" <${email}>`,
+      sender: process.env.EMAIL_USER,
+      replyTo: email,
       to: process.env.OWNER_EMAIL,
-      subject: `New Product Notification Subscription`,
-      text: textContent
+      subject: 'New Notification Subscription',
+      text: `NEW NOTIFICATION SUBSCRIPTION\n\nEmail: ${email}\n\nTimestamp: ${new Date().toLocaleString()}`
     };
 
-    await transporter.sendMail(mailOptions);
+    // Immediate response
     res.status(200).json({ message: 'Subscription successful!' });
-  } catch (error) {
-    console.error('Subscription error:', error);
-    res.status(500).json({ 
-      message: 'Failed to process subscription',
-      error: error.message 
-    });
+
+    // Process in background
+    transporter.sendMail(mailOptions)
+      .then(() => console.log('Subscription email sent'))
+      .catch(err => console.error('Subscription email error:', err));
+
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
